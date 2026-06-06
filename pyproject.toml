@@ -1,37 +1,26 @@
-[
-build-system
-]
-requires = [
-    "setuptools>=61.0"
-]
+[build-system]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
-[
-project
-]
+[project]
 name = "tgflim"
-version = "0.0.0"
-description = "tgflim: simulation for time-gated FLIM"
+version = "0.1.0"
+description = "tgflim: modular simulation and analysis for time-gated FLIM"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-authors = [
-    { name = "Ishaan Singh" }
-]
-keywords = [
-    "flim",
-    "tgflim"
-]
+authors = [{ name = "Ishaan Singh" }]
+keywords = ["flim", "tgflim", "fluorescence", "lifetime", "spad"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent"
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
 ]
 
-[
-tool.setuptools.packages.find
-]
-include = [
-    "tgflim*"
-]
-
+[tool.setuptools.packages.find]
+include = ["tgflim*"]

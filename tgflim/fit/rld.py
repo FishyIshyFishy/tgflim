@@ -1,41 +1,62 @@
-# fit/rld.py
+"""Rapid Lifetime Determination: closed-form estimators from a few gates.
+
+These are the only place the bi-exponential RLD algebra lives (the SPAD512 code
+duplicated it across five files). ``bi_rld_kernel`` is written to broadcast over a
+trailing pixel axis so a whole image is solved in one call by the Fitter.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-def mono_rld(t, trace, **kwargs):
-    """Two-gate RLD for monoexp. Uses the first 2 gates of the trace."""
-    if len(trace) < 2:
-        return None
-    D0, D1 = float(trace[0]), float(trace[1])
-    if D0 <= 0 or D1 <= 0 or D0 == D1:
-        return None
-    step = kwargs.get("step", t[1]-t[0])
-    # classic formulas
-    tau = step / np.log(D0 / D1)
-    if not np.isfinite(tau) or tau <= 0:
-        return None
-    # crude amplitude estimate at t=0 (offset ignored)
-    A = D0 - 0.0
-    return {"A": A, "tau": tau, "C": 0.0}
+from .registry import register
 
-def bi_rld(t, trace, **kwargs):
-    if len(trace) < 4:
-        return None
+if TYPE_CHECKING:
+    from ..params import Acquisition, Detector, Sample
 
-    D0, D1, D2, D3 = [float(x) for x in trace[:4]]
-    if any(v <= 0 for v in (D0, D1, D2, D3)):
-        return None
-    step = kwargs.get("step", t[1]-t[0])
 
-    try:
-        tau1 = step / np.log(D0 / D1)
-        tau2 = step / np.log(D2 / D3)
-    except Exception:
-        return None
-    if not (np.isfinite(tau1) and np.isfinite(tau2)) or tau1 <= 0 or tau2 <= 0:
-        return None
-    if tau1 > tau2:
-        tau1, tau2 = tau2, tau1
+@register("mono_rld")
+def mono_rld(times, counts, acq: Acquisition, detector: Detector | None = None, sample: Sample | None = None) -> dict[str, float]:
+    d0, d1 = counts[0], counts[1]
+    ratio = np.log(d0 / d1)
+    tau = acq.step / ratio
+    amp = (d0**2) * ratio / (acq.step * (d0 - d1))
+    return {"A": float(amp), "tau": float(tau)}
 
-    A = max(D0 - 0.0, 0.0)
-    B = max(D2 - 0.0, 0.0)
-    return {"A": A, "tau1": tau1, "B": B, "tau2": tau2, "C": 0.0}
+
+@register("mono_rld_50ovp")
+def mono_rld_50ovp(times, counts, acq: Acquisition, detector: Detector | None = None, sample: Sample | None = None) -> dict[str, float]:
+    d0, d1 = counts[0], counts[1]
+    tau = -acq.step / np.log((d1**2) / (d0**2))
+    amp = 2 * (d0**3) * np.log(d1 / d0) / (acq.step * ((d1**2) - (d0**2)))
+    return {"A": float(amp), "tau": float(tau)}
+
+
+def bi_rld_kernel(gates: np.ndarray, width: float, step: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Solve the 4-gate bi-exponential RLD. ``gates`` is ``(4,)`` or ``(4, npix)``."""
+    d0, d1, d2, d3 = gates
+    ratio = width / step
+
+    r = d1 * d1 - d2 * d0
+    p = d3 * d0 - d2 * d1
+    q = d2 * d2 - d3 * d1
+    disc = p**2 - 4 * r * q
+    root = np.sqrt(disc)
+    y = (-p + root) / (2 * r)
+    x = (-p - root) / (2 * r)
+
+    s = step * (x**2 * d0 - 2 * x * d1 + d2)
+    t = (1 - ((x * d1 - d2) / (x * d0 - d1))) ** ratio
+
+    tau1 = -step / np.log(y)
+    tau2 = -step / np.log(x)
+    a1 = (-((x * d0 - d1) ** 2)) * np.log(y) / (s * t)
+    a2 = (-r * np.log(x)) / (s * (x**ratio - 1))
+    return a1, tau1, a2, tau2
+
+
+@register("bi_rld")
+def bi_rld(times, counts, acq: Acquisition, detector: Detector | None = None, sample: Sample | None = None) -> dict[str, float]:
+    a1, tau1, a2, tau2 = bi_rld_kernel(np.asarray(counts[:4], dtype=float), width=acq.width, step=acq.step)
+    return {"A1": float(a1), "tau1": float(tau1), "A2": float(a2), "tau2": float(tau2)}
